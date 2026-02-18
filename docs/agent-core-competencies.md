@@ -167,6 +167,48 @@
 
 ---
 
+## 各 Step 学习内容总结
+
+### Step 1: 最小可运行的 Agent
+
+**目标**：从零搭建一个能调用工具的 Agent，理解 Tool Use 的完整流程。
+
+**实现了什么**：
+- 创建 Agent 类，调用 Claude API（`client.messages.create`）
+- 定义第一个工具 `read_file`（schema + 实现函数）
+- 处理 LLM 的响应：判断 `stop_reason` 是 `end_turn`（直接回答）还是 `tool_use`（需要调用工具）
+- 执行工具后，将结果以 `tool_result` 格式返回给 LLM，让它生成最终回答
+
+**关键概念**：
+- Tool Use 的工作流程：用户提问 → LLM → 调用工具 → 结果喂回 LLM → 最终回答
+- `messages` 队列：LLM 无状态，每次调用必须传完整对话历史
+- `response` 是结构化对象（不是字符串），包含 `stop_reason`、`content`（TextBlock / ToolUseBlock）等字段
+- LLM 底层只输出 token 序列，API 层负责 serialize/deserialize
+
+**局限**：只能处理一次工具调用，如果 LLM 需要连续调用多个工具就不行了。
+
+---
+
+### Step 2: Agent 循环（Agentic Loop）
+
+**目标**：支持多轮工具调用，让 Agent 能处理更复杂的任务。
+
+**在 Step 1 基础上扩展了什么**：
+- 将单次调用改为 `while` 循环：只要 `stop_reason == "tool_use"`，就继续执行工具并回到 LLM
+- 添加 `max_turns` 参数，防止无限循环
+- 将 `_handle_tool_use` 改为 `_process_tool_calls`，不再直接返回结果，而是更新 messages 后继续循环
+
+**关键概念**：
+- 两层循环各司其职：
+  - 外层 while 循环（⭐ 核心竞争力）：控制多轮 LLM 调用，决定何时终止
+  - 内层 for 循环（纯工程实现）：遍历一次响应中的多个 tool_use
+- LLM 可能一次返回多个 tool_use（并行），也可能分多次返回（串行），这是概率性的，可以通过 prompt 引导但无法 100% 控制
+- `temperature` 参数控制 LLM 输出的随机性
+
+**局限**：添加新工具需要手动改多处代码，容易遗漏。
+
+---
+
 ## 现在实现 vs 现实对比 (Step 1-2)
 
 ### ③ Prompt Engineering
@@ -208,6 +250,39 @@
 - 粒度是否合适 → 太大太小都不好
 - 参数设计 → 类型、必填/可选、默认值
 - 错误返回 → 失败时返回什么信息
+
+---
+
+## Tips & 知识点
+
+### API 调用链路：从你的代码到 LLM
+
+调用 `client.messages.create(system=..., tools=..., messages=...)` 时，实际发生的是：
+
+1. **你传入结构化参数**（system, tools, messages 各自独立）
+2. **API 服务层按内部模板拼接**成一个长 token 序列（模板不公开，和训练配套）
+3. **LLM 收到的就是一个 token 序列**，它不知道什么是 API 参数
+
+### "兼容 OpenAI API" 是什么意思？
+
+- **只是接口格式一样**（相同的参数名、HTTP endpoint、返回格式）
+- **不包括内部拼接模板**（各家模型训练不同，拼接方式也不同）
+- 好处：开发者换一行 `base_url` 就能切换供应商
+
+Anthropic 有自己的 API 设计，**不兼容 OpenAI 格式**。如果想用 OpenAI 格式调 Claude，需要中间层：
+
+```
+你的代码 (OpenAI 格式) → 中间层翻译 → Anthropic API → Claude 模型
+```
+
+现成的中间层：OpenRouter、LiteLLM。本质就是把两边 API 文档对着看，做字段映射。
+
+### 各家 API 模板公开吗？
+
+| 类型 | 模板是否公开 |
+|------|------------|
+| 闭源模型（Claude, GPT） | 不公开 |
+| 开源模型（Llama, Mistral） | 公开（部署时必须知道） |
 
 ---
 

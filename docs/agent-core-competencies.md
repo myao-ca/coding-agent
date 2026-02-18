@@ -154,13 +154,13 @@
 
 | 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 |
 |------|-----------|--------|--------|--------|--------|--------|--------|--------|
-| ① | Context Management | 简陋 | 简陋 | | | | | |
-| ② | Tool Design | 涉及 | 涉及 | | | | | |
-| ③ | Prompt Engineering | 简陋 | 简陋 | | | | | |
+| ① | Context Management | 简陋 | 未改动 | 未改动 | | | | |
+| ② | Tool Design | 简陋 | 未改动 | 重点 | | | | |
+| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | | | | |
 | ④ | Error Handling | | | | | | | |
 | ⑤ | Planning & Reasoning | | | | | | | |
 | ⑥ | Memory Systems | | | | | | | |
-| ⑦ | Agentic Loop Design | | 涉及 | | | | | |
+| ⑦ | Agentic Loop Design | | 重点 | 未改动 | | | | |
 | ⑧ | Cost & Latency | | | | | | | |
 | ⑨ | Safety & Guardrails | | | | | | | |
 | ⑩ | User Experience | | | | | | | |
@@ -209,7 +209,26 @@
 
 ---
 
-## 现在实现 vs 现实对比 (Step 1-2)
+### Step 3: 工具系统
+
+**目标**：改善工具注册流程，让添加新工具更简洁；同时新增工具扩展 Agent 能力。
+
+**在 Step 2 基础上扩展了什么**：
+- 用 Python 装饰器 `@tool` 实现自动注册，添加新工具只需一处定义（schema + 函数写在一起）
+- 不再手动维护 `ALL_TOOLS` 列表和 `TOOL_FUNCTIONS` 字典
+- 新增 `write_file` 和 `list_files` 工具，Agent 从"只能读"变成"能读、能写、能看目录"
+- 更新 system prompt，告知 LLM 有新工具可用
+
+**关键概念**：
+- 装饰器的"自动注册"原理：Python 加载文件时，装饰器代码立即执行，把工具信息写入全局字典 `_tool_registry`
+- 工具 schema 的 description 直接影响 LLM 是否能正确选择和使用工具（⭐ 核心竞争力 ②）
+- LLM 只能使用 tools 参数里列出的工具，不会编造不存在的工具；缺少工具时 LLM 会告知用户无法完成
+
+**局限**：每次 `run()` 调用是独立的，没有对话记忆，无法进行多轮交互。
+
+---
+
+## 现在实现 vs 现实对比 (Step 1-3)
 
 ### ③ Prompt Engineering
 
@@ -243,13 +262,18 @@
 
 ### ② Tool Design
 
-**现在的实现**：一个 read_file 工具，schema 写得还行
+**现在的实现**：3 个工具（read_file, write_file, list_files），装饰器自动注册
 
-**现实中要考虑**：
+**Step 3 改进了什么**：
+- 从手动注册（改 4 处）→ 装饰器自动注册（改 1 处）
+- 工具多了也不容易遗漏
+
+**现实中还要考虑**：
 - 描述是否足够清晰 → LLM 能否正确理解何时用
 - 粒度是否合适 → 太大太小都不好
 - 参数设计 → 类型、必填/可选、默认值
 - 错误返回 → 失败时返回什么信息
+- 工具数量多时如何组织 → 拆分多文件、分类管理
 
 ---
 
@@ -286,4 +310,4 @@ Anthropic 有自己的 API 设计，**不兼容 OpenAI 格式**。如果想用 O
 
 ---
 
-*文档更新于 Agent 学习项目 Step 2 阶段*
+*文档更新于 Agent 学习项目 Step 3 阶段*

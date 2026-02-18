@@ -10,7 +10,7 @@ Step 2: Agent 循环
 """
 
 from anthropic import Anthropic
-from tools import ALL_TOOLS, execute_tool
+from tools import get_all_tools, execute_tool
 from config import ANTHROPIC_API_KEY
 
 
@@ -29,10 +29,12 @@ class Agent:
 
         self.system_prompt = """你是一个编程助手。你可以帮助用户：
 - 阅读和分析代码文件
+- 创建和修改文件
+- 查看项目目录结构
 - 回答编程问题
 
-当用户询问文件内容时，使用 read_file 工具来读取文件。
-如果需要读取多个文件，可以多次使用工具。
+使用 read_file 读取文件，write_file 写入文件，list_files 查看目录。
+如果需要多个操作，可以多次使用工具。
 回答要简洁、准确。"""
 
     def run(self, user_message: str) -> str:
@@ -65,7 +67,7 @@ class Agent:
                 model=self.model,
                 max_tokens=4096,
                 system=self.system_prompt,
-                tools=ALL_TOOLS,
+                tools=get_all_tools(),
                 messages=messages
             )
 
@@ -202,8 +204,8 @@ def main():
 
     agent = Agent(max_turns=10)
 
-    # 测试：需要多次工具调用的任务
-    result = agent.run("请分别读取 agent.py 和 tools.py 文件，对比它们的代码行数，哪个更长？")
+    # 测试：综合使用多个工具
+    result = agent.run("先查看当前目录有哪些文件，然后创建一个 hello.py 文件，内容是打印 hello world，最后读取确认文件内容。")
 
     print("\n")
     print("*" * 60)

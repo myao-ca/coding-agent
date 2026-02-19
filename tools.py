@@ -163,6 +163,66 @@ def list_files(path: str = ".") -> str:
 
 
 # ============================================================
+# Step 5 新增：执行代码工具
+#
+# ⭐ 核心竞争力 ⑨ Safety & Guardrails
+#    这个工具能执行任意命令，非常危险
+#    我们的简化版：只加了超时限制
+#    生产环境需要：沙箱、命令白名单、权限控制、审计日志
+# ============================================================
+
+import subprocess
+
+
+@tool(
+    name="execute_code",
+    description="执行命令行命令（如 python xxx.py）。用于运行代码、安装依赖、查看运行结果。",
+    params={
+        "command": {
+            "type": "string",
+            "description": "要执行的命令行命令"
+        },
+        "timeout": {
+            "type": "integer",
+            "description": "超时时间（秒），默认 30 秒",
+            "optional": True
+        }
+    }
+)
+def execute_code(command: str, timeout: int = 30) -> str:
+    """执行命令行命令"""
+    try:
+        # 设置 UTF-8 编码，解决 Windows 中文输出问题
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env
+        )
+
+        output = ""
+        if result.stdout:
+            output += f"[stdout]\n{result.stdout}"
+        if result.stderr:
+            output += f"[stderr]\n{result.stderr}"
+        if not output:
+            output = "(无输出)"
+
+        output += f"\n[返回码: {result.returncode}]"
+        return output
+
+    except subprocess.TimeoutExpired:
+        return f"错误：命令执行超时（{timeout}秒）"
+    except Exception as e:
+        return f"执行命令失败：{str(e)}"
+
+
+# ============================================================
 # 对外接口（给 agent.py 用的）
 # ============================================================
 

@@ -116,6 +116,13 @@ def read_file(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     """写入文件"""
     try:
+        # ⭐ 核心竞争力 ⑨ Safety & Guardrails
+        print(f"\n  [安全确认] 即将写入文件: {path}")
+        print(f"  内容预览: {content[:100]}{'...' if len(content) > 100 else ''}")
+        confirm = input("  确认写入? (y/n): ").strip().lower()
+        if confirm != "y":
+            return "用户拒绝写入该文件"
+
         dir_name = os.path.dirname(path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
@@ -192,6 +199,13 @@ import subprocess
 def execute_code(command: str, timeout: int = 30) -> str:
     """执行命令行命令"""
     try:
+        # ⭐ 核心竞争力 ⑨ Safety & Guardrails
+        # 执行前让用户确认，防止危险操作
+        print(f"\n  [安全确认] 即将执行命令: {command}")
+        confirm = input("  确认执行? (y/n): ").strip().lower()
+        if confirm != "y":
+            return "用户拒绝执行该命令"
+
         # 设置 UTF-8 编码，解决 Windows 中文输出问题
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"

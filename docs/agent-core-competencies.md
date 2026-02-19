@@ -156,15 +156,15 @@
 
 | 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 |
 |------|-----------|--------|--------|--------|--------|--------|--------|--------|
-| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | | |
-| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | | |
-| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | | |
+| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | |
+| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | |
+| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | |
 | ④ | Error Handling | | | | | | | |
 | ⑤ | Planning & Reasoning | | | | | | | |
-| ⑥ | Memory Systems | | | | 重点 | 未改动 | | |
-| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | | |
+| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | |
+| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | |
 | ⑧ | Cost & Latency | | | | | | | |
-| ⑨ | Safety & Guardrails | | | | | 简陋 | | |
+| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | |
 | ⑩ | User Experience | | | | | | | |
 
 ---
@@ -269,7 +269,24 @@
 
 ---
 
-## 现在实现 vs 现实对比 (Step 1-5)
+### Step 6: 安全护栏（Human in the Loop）
+
+**目标**：防止 Agent 执行危险操作。改动虽小但意义重大。
+
+**在 Step 5 基础上扩展了什么**：
+- 给 `write_file` 和 `execute_code` 加了用户确认机制，执行前显示操作内容，用户输入 y 才执行
+- `read_file` 和 `list_files` 是只读操作，不需要确认
+
+**关键概念**：
+- Human in the Loop：危险操作必须经过人类确认，这是 Claude Code 等生产级产品的核心安全策略
+- 安全策略按操作风险分级：只读操作直接执行，写入/执行操作需要确认
+- 用户拒绝时，返回"用户拒绝执行"给 LLM，LLM 会据此调整行为
+
+**局限**：每次都要确认比较烦，生产环境会有更灵活的权限模式（如信任某类操作、白名单目录等）。
+
+---
+
+## 现在实现 vs 现实对比 (Step 1-6)
 
 ### ③ Prompt Engineering
 
@@ -328,14 +345,18 @@
 
 ### ⑨ Safety & Guardrails
 
-**现在的实现**：execute_code 能执行任意命令，只有超时限制
+**现在的实现**：write_file 和 execute_code 执行前需用户确认（Human in the Loop），read_file 和 list_files 只读操作直接执行
 
-**现实中要考虑**：
+**Step 6 改进了什么**：
+- 从只有超时限制 → 加了用户确认机制
+- 按风险分级：只读操作自动执行，写入/执行操作需要确认
+
+**现实中还要考虑**：
 - 沙箱执行 → 隔离环境，防止影响宿主系统
 - 命令白名单 → 只允许安全的命令
 - 权限控制 → 不能 rm -rf /、不能访问敏感文件
 - 审计日志 → 记录所有执行的命令
-- 用户确认 → 危险操作前先问用户
+- 灵活的权限模式 → 信任某类操作、白名单目录、按会话授权等
 
 ---
 
@@ -403,4 +424,4 @@ Agent 的核心价值就是自主迭代：写代码 → 运行 → 发现错误 
 
 ---
 
-*文档更新于 Agent 学习项目 Step 5 阶段*
+*文档更新于 Agent 学习项目 Step 6 阶段*

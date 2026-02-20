@@ -1,17 +1,17 @@
 """
-Step 4: 对话记忆
+Step 7: 错误处理与恢复
 
-改进：messages 从局部变量提升为实例变量，支持多轮对话
-新增：交互式对话循环（REPL）
+改进：给 LLM API 调用添加重试机制，区分可重试和不可重试错误
+新增：指数退避重试、错误分类、优雅降级
 
-⭐ 核心竞争力 ⑥ Memory Systems
-   - 最简单的短期记忆：对话历史保留在内存中
-   - 生产环境还需要：持久化、上下文压缩、跨会话记忆
-
-⭐ 核心竞争力 ① Context Management
-   - messages 会随对话持续增长，之前讨论的问题现在更突出
+⭐ 核心竞争力 ④ Error Handling & Recovery
+   - 重试：临时性错误（网络超时、限流）自动重试，指数退避
+   - 不可重试：鉴权失败、参数错误，直接上报
+   - 优雅降级：重试耗尽后返回友好消息，不崩溃
 """
 
+import time
+import anthropic as anthropic_lib
 from anthropic import Anthropic
 from tools import get_all_tools, execute_tool
 from config import ANTHROPIC_API_KEY
@@ -33,29 +33,13 @@ class Agent:
 如果需要多个操作，可以多次使用工具。
 回答要简洁、准确。"""
 
-        # ============================================================
-        # ⭐ 核心竞争力 ⑥ Memory Systems
-        #
-        # Step 4 核心改动：messages 从 run() 的局部变量 → 实例变量
-        # 这样每次 run() 调用都能看到之前的对话历史
-        #
-        # 这是最简单的"短期记忆"实现
-        # 局限：
-        # - 只在内存中，程序关闭就丢失
-        # - 会无限增长，最终超出 context 限制
-        # ============================================================
         self.conversation_history = []
 
     def run(self, user_message: str) -> str:
-        """
-        运行 Agent 处理用户消息
-
-        Step 4 改动：不再每次创建新 messages，而是追加到 conversation_history
-        """
+        """运行 Agent 处理用户消息"""
         self._print_header("用户输入")
         print(f"  {user_message}")
 
-        # 追加用户消息到对话历史（不再每次新建）
         self.conversation_history.append({
             "role": "user",
             "content": user_message
@@ -70,19 +54,40 @@ class Agent:
 
             print("\n  >>> 调用 LLM...")
 
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=self.system_prompt,
-                tools=get_all_tools(),
-                messages=self.conversation_history
-            )
+            # ============================================================
+            # ⭐ 核心竞争力 ④ Error Handling & Recovery
+            #
+            # Step 7 核心改动：把 LLM 调用包裹在 try/except 中
+            # _call_llm_with_retry() 内部处理重试逻辑
+            # 如果重试耗尽，异常会冒泡到这里，返回友好消息（降级）
+            # ============================================================
+            try:
+                response = self._call_llm_with_retry(self.conversation_history)
+            except anthropic_lib.RateLimitError:
+                self._print_header("错误")
+                print("  API 限流，重试次数耗尽")
+                return "抱歉，API 调用频率超限，请稍后再试。"
+            except anthropic_lib.APIConnectionError:
+                self._print_header("错误")
+                print("  网络连接失败，重试次数耗尽")
+                return "抱歉，网络连接失败，请检查网络后重试。"
+            except anthropic_lib.AuthenticationError:
+                self._print_header("错误")
+                print("  API Key 无效")
+                return "抱歉，API Key 无效，请检查 config.py 中的配置。"
+            except anthropic_lib.BadRequestError as e:
+                self._print_header("错误")
+                print(f"  请求参数错误: {e}")
+                return f"抱歉，请求出错：{str(e)}"
+            except Exception as e:
+                self._print_header("错误")
+                print(f"  未知错误: {e}")
+                return f"抱歉，发生未知错误：{str(e)}"
 
             print(f"  <<< LLM 返回 (stop_reason: {response.stop_reason})")
             self._print_response_content(response)
 
             if response.stop_reason == "end_turn":
-                # 把 LLM 的最终回答也存入对话历史
                 self.conversation_history.append({
                     "role": "assistant",
                     "content": response.content
@@ -109,6 +114,68 @@ class Agent:
         """清空对话历史，开始新对话"""
         self.conversation_history = []
         print("[对话历史已清空]")
+
+    # ============================================================
+    # ⭐ 核心竞争力 ④ Error Handling & Recovery
+    #
+    # Step 7 新增：LLM 调用 + 指数退避重试
+    #
+    # 错误分类：
+    #   可重试（临时性问题，等一会儿能好）：
+    #     - RateLimitError (429)：触发限流
+    #     - APIConnectionError：网络抖动
+    #
+    #   不可重试（配置或逻辑问题，重试没用）：
+    #     - AuthenticationError (401)：API Key 错误
+    #     - BadRequestError (400)：请求参数有问题
+    #
+    # 指数退避：第 1 次失败等 1s，第 2 次等 2s，第 3 次等 4s
+    # 这样不会在 API 已经过载时雪上加霜
+    # ============================================================
+
+    def _call_llm_with_retry(self, messages: list):
+        """调用 LLM，遇到可重试错误时自动重试（指数退避）"""
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            try:
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=self.system_prompt,
+                    tools=get_all_tools(),
+                    messages=messages
+                )
+
+            except anthropic_lib.RateLimitError as e:
+                # 可重试：触发限流（429），等一会儿再试
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 1s, 2s, 4s
+                    print(f"\n  [重试] 触发限流 (429)，{wait_time}s 后重试 ({attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"\n  [放弃] 已重试 {max_retries} 次，限流未解除")
+                    raise
+
+            except anthropic_lib.APIConnectionError as e:
+                # 可重试：网络抖动，重连即可
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"\n  [重试] 网络连接失败，{wait_time}s 后重试 ({attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"\n  [放弃] 已重试 {max_retries} 次，网络仍不通")
+                    raise
+
+            except anthropic_lib.AuthenticationError:
+                # 不可重试：API Key 错误，重试没用
+                print(f"\n  [鉴权失败] API Key 无效，请检查 config.py，不再重试")
+                raise
+
+            except anthropic_lib.BadRequestError as e:
+                # 不可重试：请求参数有问题，重试没用
+                print(f"\n  [请求错误] 参数有问题，不再重试: {e}")
+                raise
 
     def _process_tool_calls(self, messages: list, response) -> None:
         """处理工具调用"""

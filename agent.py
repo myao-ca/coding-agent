@@ -1,13 +1,11 @@
 """
-Step 7: 错误处理与恢复
+Step 8: 流式输出（Streaming）
 
-改进：给 LLM API 调用添加重试机制，区分可重试和不可重试错误
-新增：指数退避重试、错误分类、优雅降级
+改进：LLM 响应边生成边打印，而不是等全部生成完才显示
 
-⭐ 核心竞争力 ④ Error Handling & Recovery
-   - 重试：临时性错误（网络超时、限流）自动重试，指数退避
-   - 不可重试：鉴权失败、参数错误，直接上报
-   - 优雅降级：重试耗尽后返回友好消息，不崩溃
+⭐ 核心竞争力 ⑩ User Experience
+   - 流式输出：LLM 打字机效果，用户立刻看到响应
+   - 生产环境标配：等待几秒才出现内容体验极差
 """
 
 import time
@@ -35,7 +33,7 @@ class Agent:
 
         self.conversation_history = []
 
-    def run(self, user_message: str) -> str:
+    def run(self, user_message: str) -> None:
         """运行 Agent 处理用户消息"""
         self._print_header("用户输入")
         print(f"  {user_message}")
@@ -52,39 +50,39 @@ class Agent:
             self._print_header(f"第 {turn} 轮")
             self._print_messages_summary(self.conversation_history)
 
-            print("\n  >>> 调用 LLM...")
+            print("\n  >>> 调用 LLM（流式）...\n")
 
             # ============================================================
-            # ⭐ 核心竞争力 ④ Error Handling & Recovery
+            # ⭐ 核心竞争力 ⑩ User Experience
             #
-            # Step 7 核心改动：把 LLM 调用包裹在 try/except 中
-            # _call_llm_with_retry() 内部处理重试逻辑
-            # 如果重试耗尽，异常会冒泡到这里，返回友好消息（降级）
+            # _call_llm_with_retry() 内部用 stream()：
+            #   - 文字边生成边打印（打字机效果）
+            #   - 返回完整的 response 对象（和非流式一样），供后续循环使用
             # ============================================================
             try:
                 response = self._call_llm_with_retry(self.conversation_history)
             except anthropic_lib.RateLimitError:
                 self._print_header("错误")
-                print("  API 限流，重试次数耗尽")
-                return "抱歉，API 调用频率超限，请稍后再试。"
+                print("  API 限流，重试次数耗尽，请稍后再试。")
+                return
             except anthropic_lib.APIConnectionError:
                 self._print_header("错误")
-                print("  网络连接失败，重试次数耗尽")
-                return "抱歉，网络连接失败，请检查网络后重试。"
+                print("  网络连接失败，请检查网络后重试。")
+                return
             except anthropic_lib.AuthenticationError:
                 self._print_header("错误")
-                print("  API Key 无效")
-                return "抱歉，API Key 无效，请检查 config.py 中的配置。"
+                print("  API Key 无效，请检查 config.py 中的配置。")
+                return
             except anthropic_lib.BadRequestError as e:
                 self._print_header("错误")
-                print(f"  请求参数错误: {e}")
-                return f"抱歉，请求出错：{str(e)}"
+                print(f"  请求出错：{str(e)}")
+                return
             except Exception as e:
                 self._print_header("错误")
-                print(f"  未知错误: {e}")
-                return f"抱歉，发生未知错误：{str(e)}"
+                print(f"  未知错误：{str(e)}")
+                return
 
-            print(f"  <<< LLM 返回 (stop_reason: {response.stop_reason})")
+            print(f"\n  <<< 流式完成 (stop_reason: {response.stop_reason})")
             self._print_response_content(response)
 
             if response.stop_reason == "end_turn":
@@ -95,7 +93,7 @@ class Agent:
 
                 self._print_header("循环结束")
                 print(f"  共执行 {turn} 轮")
-                return self._extract_text(response)
+                return
 
             elif response.stop_reason == "tool_use":
                 print("\n  --- 执行工具 ---")
@@ -104,11 +102,10 @@ class Agent:
 
             else:
                 print(f"\n  [!] 意外的 stop_reason: {response.stop_reason}")
-                return self._extract_text(response)
+                return
 
         self._print_header("警告")
         print(f"  达到最大轮次 {self.max_turns}，强制退出")
-        return "抱歉，处理轮次过多，已停止。"
 
     def reset(self):
         """清空对话历史，开始新对话"""
@@ -116,41 +113,40 @@ class Agent:
         print("[对话历史已清空]")
 
     # ============================================================
-    # ⭐ 核心竞争力 ④ Error Handling & Recovery
+    # ⭐ 核心竞争力 ⑩ User Experience（Step 8 核心改动）
     #
-    # Step 7 新增：LLM 调用 + 指数退避重试
+    # 关键区别：
+    #   非流式：client.messages.create() → 等全部生成完 → 返回完整 response
+    #   流式：  client.messages.stream() → 边生成边打印 → stream 结束后拿完整 response
     #
-    # 错误分类：
-    #   可重试（临时性问题，等一会儿能好）：
-    #     - RateLimitError (429)：触发限流
-    #     - APIConnectionError：网络抖动
-    #
-    #   不可重试（配置或逻辑问题，重试没用）：
-    #     - AuthenticationError (401)：API Key 错误
-    #     - BadRequestError (400)：请求参数有问题
-    #
-    # 指数退避：第 1 次失败等 1s，第 2 次等 2s，第 3 次等 4s
-    # 这样不会在 API 已经过载时雪上加霜
+    # stream.text_stream 只 yield 文字 token，工具调用不在这里
+    # stream.get_final_message() 返回和 create() 一样的 response 对象
+    # 所以 stream 结束后，后续的工具调用处理逻辑完全不用改
     # ============================================================
 
     def _call_llm_with_retry(self, messages: list):
-        """调用 LLM，遇到可重试错误时自动重试（指数退避）"""
+        """调用 LLM（流式），遇到可重试错误时自动重试（指数退避）"""
         max_retries = 3
 
         for attempt in range(max_retries):
             try:
-                return self.client.messages.create(
+                with self.client.messages.stream(
                     model=self.model,
                     max_tokens=4096,
                     system=self.system_prompt,
                     tools=get_all_tools(),
                     messages=messages
-                )
+                ) as stream:
+                    # 边生成边打印文字（打字机效果）
+                    for text in stream.text_stream:
+                        print(text, end="", flush=True)
+
+                    # 返回完整 response，和 create() 的返回值接口一致
+                    return stream.get_final_message()
 
             except anthropic_lib.RateLimitError as e:
-                # 可重试：触发限流（429），等一会儿再试
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # 1s, 2s, 4s
+                    wait_time = 2 ** attempt
                     print(f"\n  [重试] 触发限流 (429)，{wait_time}s 后重试 ({attempt + 1}/{max_retries})...")
                     time.sleep(wait_time)
                 else:
@@ -158,7 +154,6 @@ class Agent:
                     raise
 
             except anthropic_lib.APIConnectionError as e:
-                # 可重试：网络抖动，重连即可
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     print(f"\n  [重试] 网络连接失败，{wait_time}s 后重试 ({attempt + 1}/{max_retries})...")
@@ -168,12 +163,10 @@ class Agent:
                     raise
 
             except anthropic_lib.AuthenticationError:
-                # 不可重试：API Key 错误，重试没用
-                print(f"\n  [鉴权失败] API Key 无效，请检查 config.py，不再重试")
+                print(f"\n  [鉴权失败] API Key 无效，不再重试")
                 raise
 
             except anthropic_lib.BadRequestError as e:
-                # 不可重试：请求参数有问题，重试没用
                 print(f"\n  [请求错误] 参数有问题，不再重试: {e}")
                 raise
 
@@ -230,7 +223,7 @@ class Agent:
     def _print_messages_summary(self, messages: list) -> None:
         print(f"\n  messages 队列 ({len(messages)} 条):")
         for i, msg in enumerate(messages):
-            role = msg["role"][:4]  # user/asst
+            role = msg["role"][:4]
             content = msg["content"]
 
             if isinstance(content, str):
@@ -249,19 +242,12 @@ class Agent:
                 print(f"  [{i}] {role}: [{', '.join(block_types)}]")
 
     def _print_response_content(self, response) -> None:
-        print(f"\n  LLM 响应内容:")
-        for i, block in enumerate(response.content):
-            if block.type == "text":
-                text_preview = block.text[:100] + "..." if len(block.text) > 100 else block.text
-                print(f"    [{i}] text: \"{text_preview}\"")
-            elif block.type == "tool_use":
-                print(f"    [{i}] tool_use: {block.name}({block.input})")
-
-    def _extract_text(self, response) -> str:
-        for block in response.content:
-            if hasattr(block, "text"):
-                return block.text
-        return ""
+        # ⭐ streaming 模式下，文字已经实时打印过了，这里只显示工具调用
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        if tool_blocks:
+            print(f"\n  工具调用:")
+            for block in tool_blocks:
+                print(f"    tool_use: {block.name}({block.input})")
 
 
 # ============================================================
@@ -295,8 +281,8 @@ def main():
             agent.reset()
             continue
 
-        result = agent.run(user_input)
-        print(f"\nAgent: {result}")
+        # ⭐ streaming 模式下，run() 内部直接打印输出，不再返回文字
+        agent.run(user_input)
 
 
 if __name__ == "__main__":

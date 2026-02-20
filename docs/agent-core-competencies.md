@@ -86,6 +86,8 @@
 - Plan-and-Execute：先生成完整计划，再逐步执行
 - Tree-of-Thought：探索多个推理路径
 
+**现状（简陋）**：当前 Agent 已经在做 ReAct——LLM 每轮先输出 text（思考），再决定调哪个工具，看到结果后继续思考。这是 ReAct 的自然实现，不是显式设计的，而是 LLM 本身的行为模式。Plan-and-Execute 和 Tree-of-Thought 尚未实现。
+
 ---
 
 ### ⑥ Memory Systems (记忆系统)
@@ -160,7 +162,7 @@
 | ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 |
 | ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 |
 | ④ | Error Handling | | | | | | | 重点 |
-| ⑤ | Planning & Reasoning | | | | | | | |
+| ⑤ | Planning & Reasoning | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
 | ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 |
 | ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
 | ⑧ | Cost & Latency | | | | | | | |
@@ -367,6 +369,16 @@
 - 错误上下文保留：重试时带上原始错误信息，方便调试
 - 不同 retry 策略：jitter（随机抖动）防止多个实例同时重试造成雷群效应
 - 熔断器（Circuit Breaker）：短时间内失败太多，直接拒绝请求而不是继续重试
+
+### ⑤ Planning & Reasoning
+
+**现在的实现**：ReAct 的自然实现——LLM 每轮先输出 text（思考），再调工具（行动），看结果后继续思考。不是显式设计的，是 LLM 本身的行为模式。
+
+**现实中还要考虑**：
+- Plan-and-Execute → 先生成完整计划再执行，任务更可控，不容易跑偏
+- 计划的修正 → 执行中发现计划不对时，能动态调整
+- Tree-of-Thought → 遇到复杂问题时探索多条路径，选最优
+- 子任务分解 → 把大任务拆成小任务，分别完成再汇总
 
 ### ⑥ Memory Systems
 

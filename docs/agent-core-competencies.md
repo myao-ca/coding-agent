@@ -156,15 +156,15 @@
 
 | 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 |
 |------|-----------|--------|--------|--------|--------|--------|--------|--------|
-| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | |
-| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | |
-| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | |
-| ④ | Error Handling | | | | | | | |
+| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 |
+| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ④ | Error Handling | | | | | | | 重点 |
 | ⑤ | Planning & Reasoning | | | | | | | |
-| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | |
-| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | |
+| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 |
+| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
 | ⑧ | Cost & Latency | | | | | | | |
-| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | |
+| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | 未改动 |
 | ⑩ | User Experience | | | | | | | |
 
 ---
@@ -286,7 +286,28 @@
 
 ---
 
-## 现在实现 vs 现实对比 (Step 1-6)
+### Step 7: 错误处理与恢复（Error Handling & Recovery）
+
+**目标**：让 Agent 在 API 调用失败时不崩溃，能自动重试临时性错误，区分可恢复和不可恢复的问题。
+
+**在 Step 6 基础上扩展了什么**：
+- 将 LLM 调用提取为 `_call_llm_with_retry()` 方法，内部实现指数退避重试
+- 区分两类错误：
+  - **可重试**（临时性）：`RateLimitError`（429 限流）、`APIConnectionError`（网络抖动）→ 等待后重试
+  - **不可重试**（配置/逻辑问题）：`AuthenticationError`（401 API Key 错误）、`BadRequestError`（400 参数错误）→ 立即上报
+- `run()` 方法捕获最终异常，返回友好错误消息而不是让程序崩溃
+
+**关键概念**：
+- **指数退避（Exponential Backoff）**：第 1 次失败等 1s，第 2 次等 2s，第 3 次等 4s。在 API 已经过载时，固定间隔重试会让情况更糟，指数退避给服务器恢复时间
+- **错误分类**是关键：不区分就无法正确处理。限流等一会儿能好，但 API Key 错了重试一万次也没用
+- **优雅降级**：重试耗尽后返回用户可理解的消息，不是把 Python traceback 抛给用户
+- 工具执行错误（文件不存在、命令失败）不在这里处理——工具已经返回错误字符串给 LLM，LLM 会自行调整（这是 Tool Design 的范畴）
+
+**局限**：只处理了 API 调用的错误，工具层没有重试机制（工具失败直接返回错误字符串）。也没有区分"连续多次工具失败"是否应该终止循环。
+
+---
+
+## 现在实现 vs 现实对比 (Step 1-7)
 
 ### ③ Prompt Engineering
 
@@ -333,6 +354,20 @@
 - 错误返回 → 失败时返回什么信息
 - 工具数量多时如何组织 → 拆分多文件、分类管理
 
+### ④ Error Handling & Recovery
+
+**现在的实现**：
+- API 调用重试（指数退避，最多 3 次）
+- 可重试 vs 不可重试错误分类
+- 优雅降级（返回友好消息，不崩溃）
+
+**现实中还要考虑**：
+- 工具层重试：网络工具（HTTP 请求）失败也需要重试
+- 连续失败检测：同一工具连续失败 N 次，应主动放弃并上报
+- 错误上下文保留：重试时带上原始错误信息，方便调试
+- 不同 retry 策略：jitter（随机抖动）防止多个实例同时重试造成雷群效应
+- 熔断器（Circuit Breaker）：短时间内失败太多，直接拒绝请求而不是继续重试
+
 ### ⑥ Memory Systems
 
 **现在的实现**：对话历史保存在实例变量中（内存），程序关闭就丢失
@@ -361,6 +396,35 @@
 ---
 
 ## Tips & 知识点
+
+### System Prompt 决定 LLM 的工作方式：以"验证代码"为例
+
+System prompt 不只是介绍工具——它决定 LLM **如何工作**。一个模糊的 system prompt 会让 LLM 用"直觉"行事，结果可能很糟糕。
+
+**案例**：让 Agent 写一个"输入年份，计算属相"的程序。
+
+LLM 写完 `zodiac.py`（含交互式 `input()` 循环），然后想验证它是否正确，于是调用：
+
+```
+execute_code("python zodiac.py")
+```
+
+结果：程序在等用户输入年份，但 `subprocess` 捕获了 stdout（提示看不到），Agent 假死。
+
+**根本原因**：我们的 system prompt 只说了"你是编程助手，可以读写文件、执行命令"，没有告诉 LLM **验证代码时该怎么做**。LLM 凭直觉选了最"自然"的方式——直接运行程序——但这在 Agent 环境里行不通。
+
+**Claude Code 等生产级 Agent 的做法**：system prompt 里会明确指导验证策略，比如：
+- 验证函数逻辑时，直接调函数而不是运行整个程序
+- 不要运行需要人机交互的程序（有 `input()` 的程序）
+- 用 `python -c "..."` 或写独立测试脚本来验证
+
+如果 system prompt 里有这条规则，LLM 就会选择：
+```
+execute_code('python -c "from zodiac import get_chinese_zodiac; print(get_chinese_zodiac(2024))"')
+```
+→ 直接调函数，无 `input()`，立刻返回 "龙"，验证成功。
+
+**结论**：LLM 能做什么取决于工具（Tool Design），但 LLM **怎么做**很大程度取决于 system prompt（Prompt Engineering）。工具没有的行为 LLM 做不了，但工具有而 system prompt 没引导的行为，LLM 会凭直觉——直觉不一定对。属于 ⭐ 核心竞争力 ③ Prompt Engineering。
 
 ### API 调用链路：从你的代码到 LLM
 
@@ -424,4 +488,4 @@ Agent 的核心价值就是自主迭代：写代码 → 运行 → 发现错误 
 
 ---
 
-*文档更新于 Agent 学习项目 Step 6 阶段*
+*文档更新于 Agent 学习项目 Step 7 阶段*

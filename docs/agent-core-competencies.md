@@ -156,18 +156,18 @@
 
 在学习过程中，每个核心竞争力的涉及情况：
 
-| 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 |
-|------|-----------|--------|--------|--------|--------|--------|--------|--------|
-| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 |
-| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ④ | Error Handling | | | | | | | 重点 |
-| ⑤ | Planning & Reasoning | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 |
-| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ⑧ | Cost & Latency | | | | | | | |
-| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | 未改动 |
-| ⑩ | User Experience | | | | | | | |
+| 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 | Step 8 |
+|------|-----------|--------|--------|--------|--------|--------|--------|--------|--------|
+| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 | 未改动 |
+| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ④ | Error Handling | | | | | | | 重点 | 未改动 |
+| ⑤ | Planning & Reasoning | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑧ | Cost & Latency | | | | | | | | |
+| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | 未改动 | 未改动 |
+| ⑩ | User Experience | | | | | | | | 重点 |
 
 ---
 
@@ -309,6 +309,22 @@
 
 ---
 
+### Step 8: 流式输出（Streaming）
+
+**目标**：LLM 响应边生成边显示，而不是等全部生成完才出现。
+
+**在 Step 7 基础上扩展了什么**：
+- 将 `_call_llm_with_retry()` 内部从 `client.messages.create()` 改为 `client.messages.stream()`
+- 用 `stream.text_stream` 边 yield token 边打印（打字机效果）
+- `stream.get_final_message()` 返回和 `create()` 完全一致的对象，后续工具调用逻辑零改动
+
+**关键概念**：
+- **改动极小，收益显著**：核心只是换了一个 API 调用方式，但用户体验差异肉眼可见
+- **Streaming 是生产标配**：等待几秒才出现内容在真实产品里是不可接受的，所有主流 AI 产品都用流式输出
+- **技术本身不复杂**：Streaming 是通用的工程模式（SSE/chunked response），不是 agent 特有的概念。优先级低于其他核心竞争力，但有意义
+
+---
+
 ## 现在实现 vs 现实对比 (Step 1-7)
 
 ### ③ Prompt Engineering
@@ -405,6 +421,16 @@
 - 审计日志 → 记录所有执行的命令
 - 灵活的权限模式 → 信任某类操作、白名单目录、按会话授权等
 
+### ⑩ User Experience
+
+**现在的实现**：streaming 流式输出，边生成边打印
+
+**现实中还要考虑**：
+- 进度反馈 → 工具执行中显示"正在读取文件..."之类的状态
+- 可中断 → 用户可以随时 Ctrl+C 停止，Agent 优雅退出
+- 透明度 → 展示 Agent 的思考过程（现在的 debug 日志太粗糙）
+- 多模态输出 → 图表、代码高亮、可点击链接等
+
 ---
 
 ## Tips & 知识点
@@ -500,4 +526,4 @@ Agent 的核心价值就是自主迭代：写代码 → 运行 → 发现错误 
 
 ---
 
-*文档更新于 Agent 学习项目 Step 7 阶段*
+*文档更新于 Agent 学习项目 Step 8 阶段*

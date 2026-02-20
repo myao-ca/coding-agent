@@ -11,6 +11,7 @@ Step 8: 流式输出（Streaming）
 import time
 import anthropic as anthropic_lib
 from anthropic import Anthropic
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools import get_all_tools, execute_tool
 from config import ANTHROPIC_API_KEY
 
@@ -171,27 +172,37 @@ class Agent:
                 raise
 
     def _process_tool_calls(self, messages: list, response) -> None:
-        """处理工具调用"""
+        """处理工具调用（并行执行）
+
+        ⭐ 核心竞争力 ⑧ Cost & Latency
+           - 同一轮的多个工具调用并行执行，降低总延迟
+           - 信任 LLM 策略：假设 LLM 把独立操作放在同一轮，有依赖的分开轮次
+           - tool_results 必须按原始顺序返回（用 tool_use_id 对齐，不能按完成顺序）
+        """
         messages.append({
             "role": "assistant",
             "content": response.content
         })
 
-        tool_results = []
-        tool_count = sum(1 for b in response.content if b.type == "tool_use")
-        current_tool = 0
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        tool_count = len(tool_blocks)
 
-        for block in response.content:
-            if block.type == "tool_use":
-                current_tool += 1
-                tool_name = block.name
-                tool_input = block.input
-                tool_use_id = block.id
+        print(f"\n  并行执行 {tool_count} 个工具:")
+        for block in tool_blocks:
+            print(f"    - {block.name}({block.input})")
 
-                print(f"\n  [{current_tool}/{tool_count}] 工具: {tool_name}")
-                print(f"      参数: {tool_input}")
+        # 并行执行所有工具，结果存入 tool_use_id → result 的字典
+        results = {}
 
-                result = execute_tool(tool_name, tool_input)
+        def run_tool(block):
+            return block.id, execute_tool(block.name, block.input)
+
+        with ThreadPoolExecutor(max_workers=tool_count) as executor:
+            futures = {executor.submit(run_tool, block): block for block in tool_blocks}
+            for future in as_completed(futures):
+                tool_use_id, result = future.result()
+                block = futures[future]
+                results[tool_use_id] = result
 
                 result_lines = result.split('\n')
                 if len(result_lines) > 5:
@@ -202,13 +213,14 @@ class Agent:
                     display_result = result
 
                 indented_result = display_result.replace('\n', '\n      ')
+                print(f"\n  [完成] {block.name}")
                 print(f"      结果: {indented_result}")
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": result
-                })
+        # 按原始顺序构建 tool_results（顺序必须和 tool_use 一致）
+        tool_results = [
+            {"type": "tool_result", "tool_use_id": block.id, "content": results[block.id]}
+            for block in tool_blocks
+        ]
 
         messages.append({
             "role": "user",

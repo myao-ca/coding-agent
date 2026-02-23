@@ -1,11 +1,13 @@
 """
-Step 8: 流式输出（Streaming）
+Step 10: Plan-and-Execute（规划与执行）
 
-改进：LLM 响应边生成边打印，而不是等全部生成完才显示
+改进：执行前增加规划阶段，LLM 先生成完整计划再执行
+新增：_create_plan()，不带工具的纯推理调用
 
-⭐ 核心竞争力 ⑩ User Experience
-   - 流式输出：LLM 打字机效果，用户立刻看到响应
-   - 生产环境标配：等待几秒才出现内容体验极差
+⭐ 核心竞争力 ⑤ Planning & Reasoning
+   - ReAct（之前）：走一步看一步，容易跑偏、做多余的事
+   - Plan-and-Execute（现在）：先整体规划，执行阶段对着计划走
+   - 规划阶段不给工具：强迫 LLM 先思考全局，而不是立刻行动
 """
 
 import time
@@ -35,14 +37,35 @@ class Agent:
         self.conversation_history = []
 
     def run(self, user_message: str) -> None:
-        """运行 Agent 处理用户消息"""
+        """运行 Agent 处理用户消息（Plan-and-Execute）"""
         self._print_header("用户输入")
         print(f"  {user_message}")
 
-        self.conversation_history.append({
-            "role": "user",
-            "content": user_message
-        })
+        # ============================================================
+        # ⭐ 核心竞争力 ⑤ Planning & Reasoning
+        #
+        # Phase 1: 规划阶段
+        #   - 单独调用 LLM，不传 tools 参数（纯推理）
+        #   - LLM 被迫先整体思考，而不是立刻调工具行动
+        #
+        # Phase 2: 执行阶段
+        #   - 把计划注入对话历史，执行 LLM 看到自己"制定"的计划
+        #   - 有了全局视角，不容易做多余的事或丢失原始目标
+        # ============================================================
+
+        # --- Phase 1: 规划 ---
+        self._print_header("规划阶段")
+        print("\n  >>> 生成执行计划（纯推理，不调用工具）...\n")
+        plan = self._create_plan(user_message)
+
+        # 将计划注入对话：user 提问 → assistant 给出计划 → user 说"请执行"
+        # 执行阶段的 LLM 看到自己"说过"这个计划，会倾向于遵循它
+        self.conversation_history.append({"role": "user", "content": user_message})
+        self.conversation_history.append({"role": "assistant", "content": f"我的执行计划：\n\n{plan}"})
+        self.conversation_history.append({"role": "user", "content": "好，请严格按照计划执行，完成后汇报最终结果。"})
+
+        # --- Phase 2: 执行 ---
+        self._print_header("执行阶段")
 
         turn = 0
         while turn < self.max_turns:
@@ -112,6 +135,33 @@ class Agent:
         """清空对话历史，开始新对话"""
         self.conversation_history = []
         print("[对话历史已清空]")
+
+    def _create_plan(self, user_message: str) -> str:
+        """
+        规划阶段：不带工具的纯推理调用，生成执行步骤
+
+        关键：不传 tools 参数
+        - 有工具时，LLM 倾向于立刻行动（ReAct 本能）
+        - 没有工具，LLM 只能输出文字，被迫做整体规划
+        """
+        planning_messages = [{
+            "role": "user",
+            "content": f"请为以下任务制定简洁的执行计划（编号列表，不要执行，只列步骤）：\n\n{user_message}"
+        }]
+
+        plan_text = ""
+        with self.client.messages.stream(
+            model=self.model,
+            max_tokens=512,
+            system="你是一个任务规划助手。将用户任务分解为清晰的执行步骤。只输出步骤列表，简洁明了，不执行任何操作。",
+            messages=planning_messages
+            # 注意：故意不传 tools，强迫 LLM 纯推理
+        ) as stream:
+            for text in stream.text_stream:
+                print(text, end="", flush=True)
+                plan_text += text
+        print()
+        return plan_text
 
     # ============================================================
     # ⭐ 核心竞争力 ⑩ User Experience（Step 8 核心改动）

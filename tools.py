@@ -237,6 +237,31 @@ def execute_code(command: str, timeout: int = 30) -> str:
 
 
 # ============================================================
+# Step 11 新增：委托给 Sub-agent
+#
+# ⭐ 核心竞争力 ⑤ Planning & Reasoning（Sub-agent）
+#    工具可以是另一个 Agent
+#    Orchestrator 把专业任务委托给专职的 Sub-agent
+# ============================================================
+
+@tool(
+    name="delegate_to_subagent",
+    description="将代码审查任务委托给专职的代码审查 Sub-agent。Sub-agent 会读取相关文件，返回专业的审查报告。适合在写完代码后请专职审查员审查。",
+    params={
+        "task": {
+            "type": "string",
+            "description": "委托给 Sub-agent 的任务，例如：'请审查 bubble_sort.py 的代码质量'"
+        }
+    }
+)
+def delegate_to_subagent(task: str) -> str:
+    """委托任务给 Sub-agent，返回结果"""
+    from subagent import SubAgent  # 延迟导入，避免循环导入
+    agent = SubAgent(max_turns=5)
+    return agent.run(task)
+
+
+# ============================================================
 # 对外接口（给 agent.py 用的）
 # ============================================================
 

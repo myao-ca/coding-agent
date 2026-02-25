@@ -156,18 +156,18 @@
 
 在学习过程中，每个核心竞争力的涉及情况：
 
-| 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 | Step 8 | Step 9 | Step 10 |
-|------|-----------|--------|--------|--------|--------|--------|--------|--------|--------|--------|---------|
-| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ④ | Error Handling | | | | | | | 重点 | 未改动 | 未改动 | 未改动 |
-| ⑤ | Planning & Reasoning | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 重点 |
-| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ⑧ | Cost & Latency | | | | | | | | | 重点 | 未改动 |
-| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | 未改动 | 未改动 | 未改动 | 未改动 |
-| ⑩ | User Experience | | | | | | | | 重点 | 未改动 | 未改动 |
+| 编号 | 核心竞争力 | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 | Step 6 | Step 7 | Step 8 | Step 9 | Step 10 | Step 11 |
+|------|-----------|--------|--------|--------|--------|--------|--------|--------|--------|--------|---------|---------|
+| ① | Context Management | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ② | Tool Design | 简陋 | 未改动 | 重点 | 未改动 | 添加工具 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 添加工具 |
+| ③ | Prompt Engineering | 简陋 | 小更新 | 更新 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ④ | Error Handling | | | | | | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑤ | Planning & Reasoning | 简陋 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 重点 | 扩展 |
+| ⑥ | Memory Systems | | | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑦ | Agentic Loop Design | | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑧ | Cost & Latency | | | | | | | | | 重点 | 未改动 | 未改动 |
+| ⑨ | Safety & Guardrails | | | | | 简陋 | 重点 | 未改动 | 未改动 | 未改动 | 未改动 | 未改动 |
+| ⑩ | User Experience | | | | | | | | 重点 | 未改动 | 未改动 | 未改动 |
 
 ---
 
@@ -597,6 +597,45 @@ LLM 的本质是：输入一个大字符串 → 输出一个大字符串。"思�
 
 我们的 `_create_plan()` 是 Prompt 级别的 CoT 应用——用架构隔离（不给工具）强迫 LLM 先推理再行动，本质和在 prompt 里说"请先思考"一样，只是更可靠。属于 ⭐ 核心竞争力 ⑤ Planning & Reasoning。
 
+### Multi-agent 的拓扑结构
+
+"Multi-agent"是个统称，涵盖多种结构。核心问题是：**谁调用谁，结果怎么流动？**
+
+**结构一：层级式（Hierarchical / Sub-agent）**
+```
+Orchestrator
+  ├── Sub-agent A（写代码）
+  ├── Sub-agent B（审查代码）
+  └── Sub-agent C（写文档）
+```
+Orchestrator 指挥，Sub-agent 执行并返回结果。Sub-agent 是从属地位。这是最常见的结构，也是我们 Step 11 实现的。
+
+**结构二：流水线（Pipeline）**
+```
+Agent1（需求分析）→ Agent2（写代码）→ Agent3（测试）→ Agent4（部署）
+```
+串行，每个 Agent 处理上一个的输出再传给下一个。适合有明确阶段的任务。
+
+**结构三：并行（Parallel / Fan-out & Fan-in）**
+```
+         ┌→ Agent A（方案一）─┐
+主Agent ─┼→ Agent B（方案二）─┼→ 主Agent 汇总
+         └→ Agent C（方案三）─┘
+```
+同时启动多个 Agent 独立工作，最后汇总结果。适合需要多视角或并行加速的任务。
+
+**结构四：辩论式（Debate）**
+```
+Agent1 提出观点 → Agent2 反驳 → Agent1 回应 → ... → Judge Agent 裁定
+```
+Agent 之间"平起平坐"，互相调用。但必须有明确的终止条件，否则会无限循环。适合需要批判性思考的复杂决策。
+
+**关键洞察**：
+- 大多数生产级系统本质上都有一个 Orchestrator，即使有多层嵌套
+- 真正的"平起平坐"（互相 call）在实践中较少，因为循环调用容易死循环
+- 结构选择取决于任务特性：有依赖用流水线，需要并行用 Fan-out，需要批判用辩论
+- 生产级框架（LangGraph、AutoGen、CrewAI）把这些结构抽象成图、对话、或编排对象，Agent 本身是可复用的原语
+
 ### 约束创造思考，自由导致冲动
 
 这是 agent 设计里一个反直觉但极其重要的原则，用三个比喻来理解：
@@ -659,4 +698,30 @@ Agent 的核心价值就是自主迭代：写代码 → 运行 → 发现错误 
 
 **局限**：每次请求都多一次 LLM 调用（规划阶段），对简单任务是浪费。生产环境通常会先判断任务复杂度，复杂任务才触发规划阶段。
 
-*文档更新于 Agent 学习项目 Step 10 阶段*
+---
+
+### Step 11: Sub-agent（多 Agent 协作）
+
+**目标**：让 Agent 能把专业子任务委托给另一个 Agent，实现职责分离——Orchestrator 负责调度，Sub-agent 负责专精任务。
+
+**在 Step 10 基础上扩展了什么**：
+- 新建 `subagent.py`：独立的 Sub-agent 类，角色是"专职代码审查员"
+  - 只有只读工具（`read_file`、`list_files`）——代码审查员不应该修改文件
+  - 用 `client.messages.create()`（非流式），`run()` 返回字符串结果给 Orchestrator
+  - 没有 Human-in-the-Loop 确认——由程序调用，不直接面对用户
+  - 没有 Plan-and-Execute——审查任务相对直接
+- 在 `tools.py` 新增 `delegate_to_subagent` 工具：Orchestrator 通过这个普通工具调用 Sub-agent
+  - 延迟导入（`from subagent import SubAgent` 写在函数内部）避免循环导入
+
+**关键概念**：
+- **工具可以是另一个 Agent**：从 Orchestrator 视角看，`delegate_to_subagent` 就是普通工具——调用它、拿结果。但内部是完整的 Agent，有自己的 system prompt、工具集、LLM 调用、agentic loop
+- **Sub-agent 的工具集是精简的**：根据职责定制。代码审查员只需要读文件，不需要写文件或执行命令
+- **避免循环导入**：`subagent.py` 不导入 `agent.py` 或 `tools.py`，自带精简工具定义；`tools.py` 通过延迟导入引用 Sub-agent，避免模块加载时的循环依赖
+- **返回值设计**：`Agent.run()` 返回 `None`（直接打印），`SubAgent.run()` 返回 `str`（供 Orchestrator 使用）——因为 Sub-agent 的结果要作为工具调用的结果传回给 Orchestrator
+
+**局限**：
+- `subagent.py` 重复了大量 `agent.py` 的代码——agentic loop、LLM 调用、工具执行逻辑几乎一模一样；`_read_file`、`_list_files` 也重复了 `tools.py` 里的实现。这是为了避免循环导入而做的取舍。生产环境通常会把共用逻辑抽成基类（`BaseAgent`），Sub-agent 只需配置 system prompt 和工具集，不用重写循环
+- Sub-agent 每次调用都是新实例，没有跨调用的状态持久化
+- Orchestrator 无法感知 Sub-agent 的中间过程（只拿到最终字符串）
+
+*文档更新于 Agent 学习项目 Step 11 阶段*
